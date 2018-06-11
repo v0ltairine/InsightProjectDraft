@@ -1,0 +1,143 @@
+from bs4 import BeautifulSoup as bs
+import requests
+from bs4.element import Comment
+import urllib.request
+import psycopg2
+#from config import Config (not sure if I need this, maybe later, couldn't figure out how to import)
+import sys
+from sqlalchemy import create_engine
+from sqlalchemy_utils import database_exists, create_database
+import psycopg2
+import pandas as pd
+
+res = requests.get("https://en.wikipedia.org/wiki/Category:Women_editors")
+soupW = bs(res.text, "html.parser")
+Women_Editors = {}
+Women_URLs = []
+bHaveFirst = False
+bHasLast = False
+# /wiki/Josephine_Cables_Aldrich (so I know what the first name should be)
+# /wiki/Vera_Zouroff (so I know what the last name should be)
+for link in soupW.find_all("a"):
+    url = link.get("href", "")
+    if not bHaveFirst and "/wiki/Josephine_Cables_Aldrich" in url:
+        bHaveFirst = True
+    if not bHasLast and "/wiki/Vera_Zouroff" in url:
+        bHasLast= True
+    if bHaveFirst and "/wiki/" in url:
+        Women_Editors[link.text.strip()] = url
+        Women_URLs.append(url)
+        #print(url)
+    if bHasLast:
+        break
+        
+def tag_visible(element):
+    if element.parent.name in ['style', 'script', 'head', 'title', 'meta', '[document]']:
+        return False
+    if isinstance(element, Comment):
+        return False
+    return True
+
+
+def text_from_html(body):
+    soup = bs(body, 'html.parser')
+    texts = soup.findAll(text = True)
+    visible_texts = filter(tag_visible, texts)  
+    return u" ".join(t.strip() for t in visible_texts)
+
+def read_Women_pages(Women_Editors):
+    EditorRows = []
+    pref = "https://en.wikipedia.org//"    
+    i = 1
+    for OneURL in Women_Editors:
+        print(OneURL)
+        html = urllib.request.urlopen(pref+OneURL).read()
+        longText = text_from_html(html)
+        #print(longText)
+        EditorRows.append((i, OneURL, longText))
+        i = i+1
+        if i > 5:
+            break
+    return EditorRows
+
+def Insert_Author(cur, TableName, OneTup):
+    #strCommand = "INSERT INTO " + TableName +  "VALUES(" + str(OneTup[0]) + ", \"" + OneTup[1] + "\", \"" + OneTup[2] + "\")" 
+    
+    #strName = "\"" + OneTup[1] + "\""
+    #strYuk = "\"" + OneTup[2] + "\""
+    #strCommand = "INSERT INTO " + TableName + " VALUES(" + str(OneTup[0]) + ","+ strName + "," + strYuk + ")"
+    
+    #strCommand = "INSERT INTO " + TableName +  "VALUES(str(OneTup[0]), ""\"" + OneTup[1] + "\", \"" + OneTup[2] + "\")" 
+    #print(strCommand)
+    #cur.execute(strCommand)
+    
+    query = "INSERT INTO " + TableName + "(Id, Name, BigText) VALUES (%s, %s, %s);"
+    #query = "INSERT INTO " + TableName + "(Name, BigText) VALUES (%s, %s);"
+    cur.execute(query, OneTup) 
+    
+    print(query)
+
+
+    
+def Build_DB(Editors):
+
+    con = None
+
+    try:        
+        con = psycopg2.connect("dbname='profiles' user='marieskoczylas'")   
+
+        cur = con.cursor()
+
+        # text field may not be large enough. Look at it later
+        cur.execute("CREATE TABLE WomenEditors3(Id INTEGER, Name VARCHAR(120), BigText VARCHAR(32000))")
+        # WomenEditors
+        
+        for OneEd in Editors:
+            Insert_Author(cur, "WomenEditors3", OneEd)
+        
+        #cur.execute("INSERT INTO Cars VALUES(1,'Audi',52642)")
+        
+        con.commit()
+
+
+    #except psycopg2.DatabaseError, e:
+    #    if con:
+    #        con.rollback()
+    #    print 'Error %s' % e    
+    #    sys.exit(1)
+
+
+    finally:
+
+        if con:
+            con.close()
+    
+    
+Editors = read_Women_pages(Women_URLs)
+Build_DB(Editors)
+
+dbname = 'profiles'
+username = 'marieskoczylas'
+engine = create_engine('postgres://%s@localhost/%s'%(username,dbname))
+print(engine.url)
+
+if not database_exists(engine.url):
+    create_database(engine.url)
+print(database_exists(engine.url))
+
+con = psycopg2.connect("dbname='profiles' user='marieskoczylas'")   
+cur = con.cursor()
+
+# query:
+sql_query = """
+SELECT * FROM WomenEditors3;
+"""
+view_from_sql = pd.read_sql_query(sql_query,con)
+view_from_sql.head()
+
+# Why can't I see what's in the "bigtext" section...?
+sql_query = """
+SELECT 'bigtext' FROM WomenEditors3 WHERE id='2';
+"""
+view_from_sql = pd.read_sql_query(sql_query,con)
+view_from_sql.head()
