@@ -1,0 +1,11 @@
+<HTML>
+	{% if profiles|length == 0 %}
+	<h1>No role models found. Try again!</h1>
+	{% else %}
+	<h1>Your role models are </h1> 
+	{% for role_model in profiles %}
+	<a href={{role_model['link']}}>{{role_model['name']}}</a></h1>
+	{% endfor %}
+	{% endif %}
+	<br>
+</HTML>
